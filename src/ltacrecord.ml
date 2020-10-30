@@ -101,6 +101,7 @@ let eval_file =
 
 let print_to_feat str =
   output_string (feat_file ()) str;
+  (* test features   print_endline (str); *)
   flush (feat_file ())
 
 let print_to_eval str =

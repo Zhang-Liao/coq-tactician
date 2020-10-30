@@ -64,7 +64,8 @@ module TS = struct
   type term = constr
   let term_sexpr t = constr2s t
   let term_repr t = t
-
+  
+  (* hyps and goal *)
   type proof_state = (id * term option * term) list * term
 
   let proof_state_hypotheses ps = fst ps

@@ -25,6 +25,9 @@ module L (TS: TacticianStructures) = struct
     | [x] -> []
     | x::ls -> x :: removelast ls
 
+  let disting_hyps_goal ls symbol =
+    List.map (fun str -> symbol ^ str) ls 
+
   let term_sexpr_to_features maxlength term =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
     let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
@@ -101,7 +104,7 @@ module L (TS: TacticianStructures) = struct
     let hyp_feats = List.map (fun (id, term, typ) ->
         mkfeats typ @ Option.default [] (Option.map mkfeats term)
       ) hyps in
-    mkfeats goal @ List.flatten hyp_feats
+    (disting_hyps_goal (mkfeats goal) "+") @ (disting_hyps_goal (List.flatten hyp_feats) "-")
 
   let s2s s = Leaf s
 
