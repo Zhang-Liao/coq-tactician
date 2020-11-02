@@ -28,6 +28,14 @@ module L (TS: TacticianStructures) = struct
   let disting_hyps_goal ls symbol =
     List.map (fun str -> symbol ^ str) ls 
 
+  let get_top_interm interm =
+    let flat_interm = List.flatten interm in
+    if flat_interm <> [] then
+      List.nth flat_interm (List.length flat_interm -1)
+    else
+      []
+    (* List.hd (List.rev flat_interm)  *)
+    
   let term_sexpr_to_features maxlength term =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
     let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
@@ -42,14 +50,24 @@ module L (TS: TacticianStructures) = struct
       | "Float", Leaf c :: _ -> "f" ^ c
       | _, _ -> warn (Leaf "KAK"); "*"
     in
-
+    let aux_horiz term =
+      match term with
+      (* Interesting leafs *)
+      | Node (Leaf nt :: ls) when is_atom nt ->
+        atom_to_string nt ls 
+      | Node (Leaf node :: _) -> node
+      (* Hope and pray *)
+      | term -> ""      
+    in     
     (* for a tuple `(interm, acc)`:
        - `interm` is an intermediate list of list of features that are still being assembled
          invariant: `forall i ls, 0<i<=maxlength -> In ls (List.nth (i - 1)) -> List.length ls = i`
        - `acc`: accumulates features that are fully assembled *)
     let add_atom atomtype content (interm, acc) =
-      let atom = atom_to_string atomtype content in
-      let interm' = [[atom]] :: List.map (List.map (fun fs -> atom::fs)) interm in
+      let atom = atom_to_string atomtype content in      
+      let interm' = [[atom]] :: List.map (List.map (fun fs -> atom::fs)) interm in 
+      
+      (* use removelast to control the length of terms *)
       (removelast interm', List.flatten interm' @ acc) in
 
     let set_interm (interm, acc) x = x, acc in
@@ -57,8 +75,8 @@ module L (TS: TacticianStructures) = struct
     let reset_interm f = set_interm f start in
     let rec aux_reset f term = reset_interm (aux (reset_interm f) term)
     and aux_reset_fold f terms = List.fold_left aux_reset f terms
-    and aux ((interm, acc) as f) term = match term with
-
+    and aux ((interm, acc) as f) term =   
+    match term with
       (* Interesting leafs *)
       | Node (Leaf nt :: ls) when is_atom nt ->
         add_atom nt ls f
@@ -85,14 +103,27 @@ module L (TS: TacticianStructures) = struct
       | Node (Leaf "App" :: head :: args) ->
         let interm', _ as f' = aux f head in
         (* We reset back to `interm'` for every arg *)
-        reset_interm (List.fold_left (fun f' t -> set_interm (aux f' t) interm') f' args)
+        let init_horiz_feats = get_top_interm interm' in
+        let (final_interm, final_acc), horiz_feats =
+          List.fold_left (
+            fun (f', horiz_feats_acc) t -> 
+            let arg_interm, arg_acc = aux f' t in
+            let horiz_feats = aux_horiz t in
+              (set_interm (arg_interm, arg_acc) interm'), (horiz_feats_acc @ [horiz_feats])
+            )
+          (f', init_horiz_feats) args
+        in final_interm, horiz_feats :: final_acc 
+        (* reset_interm (
+          List.fold_left (
+            fun (f', horiz_feats) t -> set_interm (aux f' t) interm')
+          (f', init_horiz_feats) args ) *)
       | Node [Leaf "Cast"; term; _; typ] ->
         (* We probably want to have the type of the cast, but isolated *)
         aux (set_interm (aux (reset_interm f) typ) interm) term
 
       (* Hope and pray *)
       | term -> warn term; f
-    in
+    in    
     let _, res = aux (start, []) term in
     List.map (String.concat "-") res
 

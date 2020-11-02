@@ -44,7 +44,7 @@ module NaiveKnn : TacticianOnlineLearnerType = functor (TS : TacticianStructures
     List.sort (fun (x, _) (y, _) -> Float.compare y x) new_ranking
 
   let proof_state_to_ints ps =
-    let feats = proof_state_to_features 2 ps in
+    let feats = proof_state_to_features 3 ps in
     (* print_endline (String.concat ", " feats); *)
 
     (* Tail recursive version of map, because these lists can get very large. *)
