@@ -53,14 +53,6 @@ module L (TS: TacticianStructures) = struct
     let rec aux_horiz term depth =
       if depth = 0 then ["X"]
       else
-      (*
-      match term with
-      (* Interesting leafs *)
-      | Node (Leaf nt :: ls) when is_atom nt ->
-        atom_to_string nt ls 
-      | Node (Leaf node :: _) -> node
-      (* Hope and pray *)
-      | term -> ""   *)
         match term with
         (* Interesting leafs *)
         | Node (Leaf nt :: ls) when is_atom nt ->
@@ -68,40 +60,23 @@ module L (TS: TacticianStructures) = struct
         (* Uninteresting leafs *)
         | Node (Leaf "Sort" :: _)
         | Node (Leaf "Meta" :: _) -> []
-
-        (* Recursion for grammar we don't handle *)
-        (* TODO: Handle binders with feature substitution *)
         | Node [Leaf "LetIn"; id; _; body1; typ; body2] ->
-          (* List.fold_left (fun horiz_feats curr_term -> 
-          horiz_feats @ aux_horiz curr_term (depth - 1)) 
-          ["LetIn"] [body1; typ; body2] *)
           horiz_feat_fold "LetIn" [body1; typ; body2] depth
-          (* aux_reset_fold f [body1; typ; body2] *)
         | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
           horiz_feat_fold "Case" (term::typ::cases) depth
-          (* aux_reset_fold f (term::typ::cases) *)
         | Node [Leaf "Fix"; _; Node types; Node terms] ->
           horiz_feat_fold "Fix" (types@terms) depth 
         | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
           horiz_feat_fold "CoFix" (types@terms) depth 
-        (* TODO: Handle implication separately *)
         | Node [Leaf "Prod"  ; _; _; typ; body] ->
           horiz_feat_fold "Prod" [typ;body] depth 
         | Node [Leaf "Lambda"; _; _; typ; body] -> 
           horiz_feat_fold "Lambda" [typ;body] depth 
-        (* The golden path *)
         | Node [Leaf "Proj"; p; term] -> 
           horiz_feat_fold "Proj" [p; term] depth 
-
         | Node (Leaf "App" :: head :: args) ->
           horiz_feat_fold "App" (head :: args) depth 
-          (* reset_interm (
-            List.fold_left (
-              fun (f', horiz_feats) t -> set_interm (aux f' t) interm')
-            (f', init_horiz_feats) args ) *)
         | Node [Leaf "Cast"; term; _; typ] ->
-          (* We probably want to have the type of the cast, but isolated *)
-          (* aux (set_interm (aux (reset_interm f) typ) interm) term *)
           horiz_feat_fold "Cast" [term; typ] depth 
         (* Hope and pray *)
         | term -> ["Error"]      
@@ -113,24 +88,27 @@ module L (TS: TacticianStructures) = struct
        - `interm` is an intermediate list of list of features that are still being assembled
          invariant: `forall i ls, 0<i<=maxlength -> In ls (List.nth (i - 1)) -> List.length ls = i`
        - `acc`: accumulates features that are fully assembled *)
-    let add_atom atomtype content (interm, acc) =
-      let atom = atom_to_string atomtype content in      
-      let interm' = [[atom]] :: List.map (List.map (fun fs -> atom::fs)) interm in 
-      
+    let add_atom atomtype content (interm, acc) type_constr =
+      let atom = (atom_to_string atomtype content) in
+      let atom_with_type_constr = atom ^":"^type_constr in     
+      let interm' = [[atom_with_type_constr]] :: 
+        List.map (List.map (fun fs -> atom_with_type_constr::fs)) interm in 
       (* use removelast to control the length of terms *)
-      (removelast interm', List.flatten interm' @ acc) in
+      (removelast interm', (List.flatten interm' @ acc)) in
 
     let set_interm (interm, acc) x = x, acc in
     let start = replicate [] (maxlength - 1) in
     let reset_interm f = set_interm f start in
-    let rec aux_reset f term = reset_interm (aux (reset_interm f) term)
-    and aux_reset_fold f terms = List.fold_left aux_reset f terms
+    let rec aux_reset f term type_constr = reset_interm (aux (reset_interm f) term type_constr)
+    and aux_reset_fold f terms type_constr = 
+    List.fold_left (fun f' term -> aux_reset f' term type_constr) f terms 
+    (* List.fold_left (fun f' term -> aux_reset f' term type_constr) f terms *)
     (*TODO: specify the binders of each term *)
-    and aux ((interm, acc) as f) term =   
+    and aux ((interm, acc) as f) term type_constr =   
     match term with
       (* Interesting leafs *)
       | Node (Leaf nt :: ls) when is_atom nt ->
-        add_atom nt ls f
+        add_atom nt ls f type_constr
 
       (* Uninteresting leafs *)
       | Node (Leaf "Sort" :: _)
@@ -139,30 +117,32 @@ module L (TS: TacticianStructures) = struct
       (* Recursion for grammar we don't handle *)
       (* TODO: Handle binders with feature substitution *)
       | Node [Leaf "LetIn"; id; _; body1; typ; body2] ->
-        aux_reset_fold f [body1; typ; body2]
+        aux_reset_fold f [body1; typ; body2] "LetIn"
       | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
-        aux_reset_fold f (term::typ::cases)
-      | Node [Leaf "Fix"; _; Node types; Node terms]
+        aux_reset_fold f (term::typ::cases) "Case" 
+      | Node [Leaf "Fix"; _; Node types; Node terms] ->
+        aux_reset_fold f (terms @ types) "Fix"      
       | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
-        aux_reset_fold f (terms @ types)
+        aux_reset_fold f (terms @ types) "CoFix"
       (* TODO: Handle implication separately *)
-      | Node [Leaf "Prod"  ; _; _; typ; body]
-      | Node [Leaf "Lambda"; _; _; typ; body] -> aux_reset_fold f [typ; body]
-
+      | Node [Leaf "Prod"  ; _; _; typ; body] ->
+        aux_reset_fold f [typ; body] "Prod"
+      | Node [Leaf "Lambda"; _; _; typ; body] -> 
+        aux_reset_fold f [typ; body] "Lambda"
       (* The golden path *)
-      | Node [Leaf "Proj"; p; term] -> aux (add_atom "Const" [p] f) term
+      | Node [Leaf "Proj"; p; term] -> 
+        aux (add_atom "Const" [p] f "Proj") term "Proj"
       | Node (Leaf "App" :: head :: args) ->
-        let interm', _ as f' = aux f head in
+        let interm', _ as f' = aux f head "App" in
         (* We reset back to `interm'` for every arg *)
-        reset_interm (List.fold_left (fun f' t -> set_interm (aux f' t) interm') f' args)
+        reset_interm (List.fold_left (fun f' t -> set_interm (aux f' t "App") interm') f' args)
       | Node [Leaf "Cast"; term; _; typ] ->
         (* We probably want to have the type of the cast, but isolated *)
-        aux (set_interm (aux (reset_interm f) typ) interm) term
-
+        aux (set_interm (aux (reset_interm f) typ "Cast") interm) term "Cast"
       (* Hope and pray *)
       | term -> warn term; f
     in    
-    let _, res = aux (start, []) term in
+    let _, res = aux (start, []) term "Init_Constr" in
     let horiz_feats = aux_horiz term 2 in
     (*TODO: seperate horizontal features and vertical features**)
     List.map (String.concat "-") (horiz_feats::res)
@@ -175,7 +155,7 @@ module L (TS: TacticianStructures) = struct
         mkfeats typ @ Option.default [] (Option.map mkfeats term)
       ) hyps in
     (* seperate the goal from the local context *)  
-    (disting_hyps_goal (mkfeats goal) "+") @ (disting_hyps_goal (List.flatten hyp_feats) "-")
+    (disting_hyps_goal (mkfeats goal) "GOAL-") @ (disting_hyps_goal (List.flatten hyp_feats) "HYPS-")
 
   let s2s s = Leaf s
 
