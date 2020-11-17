@@ -43,12 +43,25 @@ module NaiveKnn : TacticianOnlineLearnerType = functor (TS : TacticianStructures
     let new_ranking = List.map (fun (hash, (score, tac)) -> (score, tac)) (IntMap.bindings ranking_map) in
     List.sort (fun (x, _) (y, _) -> Float.compare y x) new_ranking
 
+
+  let count_dup l = 
+    let sl = List.sort compare l in
+      match sl with
+      | [] -> []
+      | hd::tl -> 
+        let acc,x,c = List.fold_left (fun (acc,x,c) y -> 
+          if y = x then acc,x,c+1 else (x,c)::acc, y,1) ([],hd,1) tl in
+        (x,c)::acc
+
+
   let proof_state_to_ints ps =
     let feats = proof_state_to_features 3 ps in
-    (* print_endline (String.concat ", " feats); *)
-
+    let feats_with_count_pair = count_dup feats in
+    let feats_with_count = List.map (fun (feat, count) -> feat ^ "-" ^ (Stdlib.string_of_int count)) 
+    feats_with_count_pair in
+    (* print_endline (String.concat ", " feats_with_count); *)
     (* Tail recursive version of map, because these lists can get very large. *)
-    let feats = List.rev (List.rev_map Hashtbl.hash feats) in
+    let feats = List.rev (List.rev_map Hashtbl.hash feats_with_count) in
     List.sort_uniq Int.compare feats
 
     type feature = int
