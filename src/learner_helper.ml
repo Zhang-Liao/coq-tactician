@@ -36,6 +36,12 @@ module L (TS: TacticianStructures) = struct
       []
     (* List.hd (List.rev flat_interm)  *)
     
+  let rep_elem n elem = 
+    let rec rep_elem_aux acc n elem =
+      if n = 0 then acc else rep_elem_aux (elem :: acc) (n-1) elem
+    in
+    rep_elem_aux [] n elem
+    
   let term_sexpr_to_features maxlength term =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
     let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
@@ -97,19 +103,29 @@ module L (TS: TacticianStructures) = struct
       (removelast interm', (List.flatten interm' @ acc)) in
 
     let set_interm (interm, acc) x = x, acc in
+    (* length error *)
     let start = replicate [] (maxlength - 1) in
     let reset_interm f = set_interm f start in
-    let rec aux_reset f term type_constr = reset_interm (aux (reset_interm f) term type_constr)
-    and aux_reset_fold f terms type_constr = 
-    List.fold_left (fun f' term -> aux_reset f' term type_constr) f terms 
-    (* List.fold_left (fun f' term -> aux_reset f' term type_constr) f terms *)
-    (*TODO: specify the binders of each term *)
-    and aux ((interm, acc) as f) term type_constr =   
+    let rec vert_next_level f term role =     
+    (* if next node is atom, then add the role to the atom node directly, else
+       add role to the current path  *)
+      let (interm, acc) = f in
+      match term with
+      | Node (Leaf nt ::_ ) when is_atom nt ->
+        let new_interm = interm in
+        aux_vert (new_interm, acc) term role    
+      | _ ->
+        (* ????? so many level list *)
+        let new_interm = interm @ [[[role]]] 
+        in 
+        aux_vert (new_interm, acc) term role    
+    and vert_next_level_fold f terms roles = 
+    List.fold_left (fun f' (term, role) -> vert_next_level f' term role) f (List.combine terms roles) 
+    and aux_vert ((interm, acc) as f) term role =   
     match term with
       (* Interesting leafs *)
       | Node (Leaf nt :: ls) when is_atom nt ->
-        add_atom nt ls f type_constr
-
+        add_atom nt ls f role
       (* Uninteresting leafs *)
       | Node (Leaf "Sort" :: _)
       | Node (Leaf "Meta" :: _) -> f
@@ -117,35 +133,94 @@ module L (TS: TacticianStructures) = struct
       (* Recursion for grammar we don't handle *)
       (* TODO: Handle binders with feature substitution *)
       | Node [Leaf "LetIn"; id; _; body1; typ; body2] ->
-        aux_reset_fold f [body1; typ; body2] "LetIn"
+        let roles = ["LetVarBody"; "LetVarType"; "LetBody"] in
+        vert_next_level_fold f [body1; typ; body2] roles
       | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
-        aux_reset_fold f (term::typ::cases) "Case" 
+        let roles = (["MatchTerm"; "MatchTermType"] @ (rep_elem (List.length cases) "Case")) in
+        vert_next_level_fold f (term::typ::cases) roles
       | Node [Leaf "Fix"; _; Node types; Node terms] ->
-        aux_reset_fold f (terms @ types) "Fix"      
+        let roles = (rep_elem (List.length terms) "FixTerm") 
+          @ (rep_elem (List.length types) "FixType") in
+        vert_next_level_fold f (terms @ types) roles     
       | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
-        aux_reset_fold f (terms @ types) "CoFix"
+        let roles = (rep_elem (List.length terms) "CoFixTerm") 
+          @ (rep_elem (List.length types) "CoFixType") in
+        vert_next_level_fold f (terms @ types) roles
       (* TODO: Handle implication separately *)
       | Node [Leaf "Prod"  ; _; _; typ; body] ->
-        aux_reset_fold f [typ; body] "Prod"
+        vert_next_level_fold f [typ; body] ["ProdType"; "ProdBody"]
       | Node [Leaf "Lambda"; _; _; typ; body] -> 
-        aux_reset_fold f [typ; body] "Lambda"
+        vert_next_level_fold f [typ; body] ["LambdaType"; "LambdaBody"]
       (* The golden path *)
       | Node [Leaf "Proj"; p; term] -> 
-        aux (add_atom "Const" [p] f "Proj") term "Proj"
+        aux_vert (add_atom "Const" [p] f "Proj") term "Proj" (* ??? Proj ??? *)
       | Node (Leaf "App" :: head :: args) ->
-        let interm', _ as f' = aux f head "App" in
-        (* We reset back to `interm'` for every arg *)
-        reset_interm (List.fold_left (fun f' t -> set_interm (aux f' t "App") interm') f' args)
+        let roles = "AppFun" :: (rep_elem (List.length args) "AppArg") in 
+        vert_next_level_fold f (head::args) roles
       | Node [Leaf "Cast"; term; _; typ] ->
         (* We probably want to have the type of the cast, but isolated *)
-        aux (set_interm (aux (reset_interm f) typ "Cast") interm) term "Cast"
+        aux_vert (set_interm (aux_vert (reset_interm f) typ "CastType") interm) term "CastTerm"
       (* Hope and pray *)
       | term -> warn term; f
     in    
-    let _, res = aux (start, []) term "Init_Constr" in
-    let horiz_feats = aux_horiz term 2 in
+    let remove_ident seman_feats =
+      List.fold_left (fun acc feat -> if List.length feat < 2 then acc else
+      acc @ [feat] ) [] seman_feats
+    in
+    let rec aux_seman_reset f term role = reset_interm (aux_seman (reset_interm f) term role)
+    and aux_seman_reset_fold f terms roles = 
+    List.fold_left (fun f' (term, role) -> aux_seman_reset f' term role) f (List.combine terms roles)    
+    and aux_seman ((interm, acc) as f) term role =   
+    match term with
+      (* Interesting leafs *)
+      | Node (Leaf nt :: ls) when is_atom nt ->
+        add_atom nt ls f role
+      (* Uninteresting leafs *)
+      | Node (Leaf "Sort" :: _)
+      | Node (Leaf "Meta" :: _) -> f
+
+      (* Recursion for grammar we don't handle *)
+      (* TODO: Handle binders with feature substitution *)
+      | Node [Leaf "LetIn"; id; _; body1; typ; body2] ->
+        let roles = ["LetVarBody"; "LetVarType"; "LetBody"] in
+        aux_seman_reset_fold f [body1; typ; body2] roles
+      | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
+        let roles = (["MatchTerm"; "MatchTermType"] @ (rep_elem (List.length cases) "Case")) in
+        aux_seman_reset_fold f (term::typ::cases) roles
+      | Node [Leaf "Fix"; _; Node types; Node terms] ->
+        let roles = (rep_elem (List.length terms) "FixTerm") 
+          @ (rep_elem (List.length types) "FixType") in
+        aux_seman_reset_fold f (terms @ types) roles     
+      | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
+        let roles = (rep_elem (List.length terms) "CoFixTerm") 
+          @ (rep_elem (List.length types) "CoFixType") in
+        aux_seman_reset_fold f (terms @ types) roles
+      (* TODO: Handle implication separately *)
+      | Node [Leaf "Prod"  ; _; _; typ; body] ->
+        aux_seman_reset_fold f [typ; body] ["ProdType"; "ProdBody"]
+      | Node [Leaf "Lambda"; _; _; typ; body] -> 
+        aux_seman_reset_fold f [typ; body] ["LambdaType"; "LambdaBody"]
+      (* The golden path *)
+      | Node [Leaf "Proj"; p; term] -> 
+        aux_seman (add_atom "Const" [p] f "Proj") term "Proj" (* ??? Proj ??? *)
+      | Node (Leaf "App" :: head :: args) ->
+        let interm', _ as f' = aux_seman f head "AppFun" in
+        (* We reset back to `interm'` for every arg *)
+        reset_interm 
+          (List.fold_left (fun f' t -> set_interm (aux_seman f' t "AppArg") interm') f' args) 
+      | Node [Leaf "Cast"; term; _; typ] ->
+        (* We probably want to have the type of the cast, but isolated *)
+        aux_seman (set_interm (aux_seman (reset_interm f) typ "CastType") interm) term "CastTerm"
+      (* Hope and pray *)
+      | term -> warn term; f
+    in 
+    let _, vert_feats = aux_vert (start, []) term "Init_Constr" in
+    let vert_feats = List.map (fun feat -> "Verti" :: feat) vert_feats in
+    let horiz_feats = "Horiz" :: (aux_horiz term 2) in
+    let _, seman_feats = (aux_seman (start, []) term "Init_Constr") in
+    let seman_feats = List.map (fun feat -> "Seman" :: feat) (remove_ident seman_feats) in
     (*TODO: seperate horizontal features and vertical features**)
-    List.map (String.concat "-") (horiz_feats::res)
+    List.map (String.concat "-") ((horiz_feats::vert_feats)@seman_feats)
 
   let proof_state_to_features max_length ps =
     let hyps = proof_state_hypotheses ps in
