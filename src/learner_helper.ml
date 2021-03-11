@@ -347,11 +347,11 @@ module L (TS: TacticianStructures) = struct
 
 
   let proof_state_to_ints ps =
-    let feats = proof_state_to_features 3 ps in
+    let feats = proof_state_to_features 2 ps in
     let feats_with_count_pair = count_dup feats in
     let feats_with_count = List.map (fun ((feat_kind, feat), count) -> feat_kind, feat ^ "-" ^ (Stdlib.string_of_int count)) 
     feats_with_count_pair in
-    (* print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); *)
+    print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev (List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats_with_count) in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
