@@ -193,14 +193,14 @@ let in_section_ltac_defs : (Names.KerName.t * glob_tactic_expr) list -> Libobjec
                                ~cache:(fun (obj, p) -> tmp_ltac_defs := p::!tmp_ltac_defs)
                                ~discharge:(fun (obj, p) -> Some p)))
 
-let with_let_prefix tac =
+let rec with_let_prefix ltac_defs tac =
   let names = List.fold_right Names.KNset.add
-      (List.concat (List.map (List.map fst) !tmp_ltac_defs)) Names.KNset.empty in
+      (List.concat (List.map (List.map fst) ltac_defs)) Names.KNset.empty in
   let tac, all, ids = rebuild names tac in
   let kername_tolname id = CAst.make (Names.(Name.mk_name (Label.to_id (KerName.label id)))) in
-  let ltac_to_let ltacset int =
+  let ltac_to_let rem_defs ltacset int =
     TacLetIn (true,
-              List.map (fun (id, tac) -> (kername_tolname id, Tacexp tac)) ltacset,
+              List.map (fun (id, tac) -> (kername_tolname id, Tacexp (with_let_prefix rem_defs tac))) ltacset,
               int) in
   let rec prefix acc = function
     | [] -> acc
@@ -208,12 +208,12 @@ let with_let_prefix tac =
       let set_occurs = all || List.fold_right (fun (id, _) b ->
           b || Names.KNset.mem id ids) ltacset false in
       if set_occurs then
-        prefix (ltac_to_let ltacset acc) rem else
+        prefix (ltac_to_let rem ltacset acc) rem else
         prefix acc rem in
-  prefix tac !tmp_ltac_defs
+  prefix tac ltac_defs
 
 let rebuild_outcomes (outcomes, tac) =
-  let rebuild_tac tac = tactic_make (with_let_prefix (tactic_repr tac)) in
+  let rebuild_tac tac = tactic_make (with_let_prefix !tmp_ltac_defs (tactic_repr tac)) in
   let rec rebuild_pd = function
     | End -> End
     | Step ps -> Step (rebuild_ps ps)
@@ -236,7 +236,7 @@ let discharge_outcomes env (outcomes, tac) =
       | Step ps -> Step (genarg_print_ps ps)
     and genarg_print_ps {executions; tactic} =
       { executions = List.map (fun (ps, pd) -> ps, genarg_print_pd pd) executions
-      ; tactic = genarg_print_tac tactic } in 
+      ; tactic = genarg_print_tac tactic } in
     let outcomes = List.map (fun {parents; siblings; before; after} ->
         { parents = List.map (fun (psa, pse) -> (psa, genarg_print_ps pse)) parents
         ; siblings = genarg_print_pd siblings
@@ -371,8 +371,6 @@ let get_field_goal2 fi gl d =
   | None -> d ()
   | Some x -> x
 
-let warn () = Feedback.msg_warning (Pp.str ("Tactician has uncovered a bug. Please report. "))
-
 let set_record b =
   modify_field record_field (fun _ -> b, ()) (fun i -> true)
 
@@ -400,13 +398,23 @@ let push_state_id_stack () =
   modify_field_goals state_id_stack_field (fun i st -> i::st, ()) (fun i -> []) >>=
   fun _ -> tclUNIT ()
 
-let pop_state_id_stack () =
+let warn tac =
+  let tac_pp t = Sexpr.format_oneline (Pptactic.pr_glob_tactic (Global.env ()) t) in
+  (* The unshelve tactic is the only tactic known to generate goals that do not inherit state from their
+     parents (because those goals were on the shelf). We filter tactics expressions that contain this
+     tactic out of the warning. *)
+  let unshelve_ml = Tacexpr.{ mltac_name = { mltac_plugin = "ltac_plugin"; mltac_tactic = "unshelve" }
+                            ; mltac_index = 0 } in
+  if not (Find_tactic_syntax.contains_ml_tactic unshelve_ml tac) then
+    Feedback.msg_warning Pp.(str "Tactician has uncovered a bug in a tactic. Please report. " ++ tac_pp tac)
+
+let pop_state_id_stack tac2 =
   let open Proofview in
   let open Notations in
   (* Sometimes, a new goal does not inherit its id from its parent, and thus the id stack
      is too short. This happens for example when using `unshelve`. In that case, we assign 0 *)
   modify_field_goals state_id_stack_field (fun i st ->
-      match st with | [] -> warn (); [], 0 | x::xs -> xs, x)
+      match st with | [] -> warn tac2; [], 0 | x::xs -> xs, x)
     (fun _ -> []) >>=
   fun _ -> tclUNIT ()
 
@@ -845,7 +853,7 @@ let record_tac (tac2 : glob_tactic_expr) : unit Proofview.tactic =
     Goal.goals >>= record_map (fun x -> x) >>= (fun after_gls ->
         let after_gls = List.map (fun gl -> get_state_id_goal_top gl, gl) after_gls in
         push_localdb (collect_states before_gls after_gls, tac2)
-      ) >>= (fun () -> pop_state_id_stack () <*> (* TODO: This is a strange way of doing things, see todo above. *)
+      ) >>= (fun () -> pop_state_id_stack tac2 <*> (* TODO: This is a strange way of doing things, see todo above. *)
                        push_tactic_trace tac2)
 
         (* Make predictions *)
