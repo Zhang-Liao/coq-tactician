@@ -4,7 +4,6 @@ open Learner_helper
 
 type feat_kind = Struct | Seman | Verti
 type proof_state_part = Goal | Hyps
-(* int means the depth of the beginning of the semantic features *)
 
 module F (TS: TacticianStructures) = struct
   module LH = L(TS)
@@ -123,15 +122,10 @@ module F (TS: TacticianStructures) = struct
 
   let proof_state_to_simple_ints ps =
     let feats = proof_state_to_simple_features 2 ps in
-    (* print_endline (String.concat ", " feats); *)
-
+    print_endline (String.concat ", " feats); 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map Hashtbl.hash feats in
     List.sort_uniq Int.compare feats
-
-
-
-(*TODO: Every variable is renamed to a textual representation of its type*)
 
   let term_sexpr_to_complex_features maxlength oterm =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
@@ -183,14 +177,12 @@ module F (TS: TacticianStructures) = struct
         | Node [Leaf "Proj"; _; term] ->
           struct_feat_fold "Proj" [term] depth
         | Node (Leaf "App" :: head :: args) ->
-          (* List.length args in let *)
           let arg_num = List.length args in
           let func_feat = (aux_struct head (depth + 1)) @ [Stdlib.string_of_int arg_num] in
           let arg_feat = List.fold_left
             (fun struct_feats curr_term -> struct_feats @ aux_struct curr_term (depth + 1))
             [] args in
           wrap_partness ("App" :: (func_feat@arg_feat))
-          (* struct_feat_fold "App" (head :: args) depth *)
         | Node [Leaf "Cast"; term; _; typ] ->
           struct_feat_fold "Cast" [term; typ] depth
         (* Hope and pray *)
@@ -217,18 +209,15 @@ module F (TS: TacticianStructures) = struct
     let set_interm (_, acc) x = x, acc in
     let start = replicate [] (maxlength - 1) in
     let reset_interm f = set_interm f start in
-    let verti_atom atomtype content (interm, acc) role =
+    (* let verti_atom atomtype content (interm, acc) role =
       let atom_with_role = get_atom_with_role atomtype content role in
       let new_interm = interm @ [atom_with_role] in
       (new_interm, acc @ [new_interm]) in
     let rec vert_next_level f term role =
-    (* if next node is atom, then add the role to the atom node directly, else
-       add role to the current path  *)
       let (original_interm, original_acc) = f in
       match term with
       | Node (Leaf nt :: ls ) when is_atom nt ->
         let _, new_acc = verti_atom nt ls f role in
-        (* for f(a,b), interm of (a) should not affect (b). Only acc is changed *)
         (original_interm, new_acc)
       | _ ->
         let new_interm = original_interm @ [role] in
@@ -277,11 +266,11 @@ module F (TS: TacticianStructures) = struct
         vert_next_level_fold f [term; typ] roles
       (* Hope and pray *)
       | term -> warn term oterm; f
-    in
+    in 
     let remove_ident seman_feats =
       List.fold_left (fun acc feat -> if List.length feat < 2 then acc else
       acc @ [feat] ) [] seman_feats
-    in
+    in *)
     let rec aux_seman_reset f term role = reset_interm (aux_seman (reset_interm f) term role)
     and aux_seman_reset_fold f terms roles =
     List.fold_left (fun f' (term, role) -> aux_seman_reset f' term role) f (List.combine terms roles)
@@ -311,8 +300,6 @@ module F (TS: TacticianStructures) = struct
         aux_seman_reset_fold f (terms @ types) roles
         (* TODO: Handle implication separately *)
       | Node [Leaf "Prod"  ; _; _; typ; body] ->
-        (* let f' = aux_seman f typ "ProdType" in
-        aux_seman f' body "ProdBody" *)
         aux_seman_reset_fold f [typ; body] ["ProdType"; "ProdBody"]
       | Node [Leaf "Lambda"; _; _; typ; body] ->
         aux_seman_reset_fold f [typ; body] ["LambdaType"; "LambdaBody"]
@@ -330,13 +317,13 @@ module F (TS: TacticianStructures) = struct
       (* Hope and pray *)
       | term -> warn term oterm; f
     in
-    let _, vert_feats = aux_vert ([], []) oterm  in
-    let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in
+    (* let _, vert_feats = aux_vert ([], []) oterm  in
+    let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in *)
     let struct_feats = Struct, "Struct" :: (aux_struct oterm 0) in
     let _, seman_feats = (aux_seman (start, []) oterm "Init_Constr") in
     let seman_feats = List.map (fun feat -> Seman, "Seman" :: feat) seman_feats in
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states *)
-    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) ((struct_feats::vert_feats) @ seman_feats)
+    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) ((struct_feats) :: seman_feats)
 
   let proof_state_to_complex_features max_length ps =
     let hyps = proof_state_hypotheses ps in
@@ -372,7 +359,7 @@ module F (TS: TacticianStructures) = struct
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats_with_count = List.rev_map (fun ((feat_kind, feat), count) -> feat_kind, feat ^ "-" ^ (Stdlib.string_of_int count))
         feats_with_count_pair in
-    (* print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); *)
+    print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
