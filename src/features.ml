@@ -364,6 +364,78 @@ module F (TS: TacticianStructures) = struct
     let feats = List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
 
+
+  let term_sexpr_to_decision_tree_features maxlength oterm =
+    let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
+    let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
+    let atom_to_string atomtype content = match atomtype, content with
+      | "Rel", _ -> "R"
+      | "Evar", (Leaf _ :: _) -> "E"
+      | "Construct", Leaf c :: _
+      | "Ind", Leaf c :: _
+      | "Var", Leaf c :: _
+      | "Const", Leaf c :: _ -> c
+      | "Int", Leaf c :: _ -> "i" ^ c
+      | "Float", Leaf c :: _ -> "f" ^ c
+      | _, _ -> warn (Leaf "KAK") oterm; "*"
+    in
+    (* for a tuple `(interm, acc)`:
+       - `interm` is an intermediate list of list of features that are still being assembled
+         invariant: `forall i ls, 0<i<=maxlength -> In ls (List.nth (i - 1)) -> List.length ls = i`
+       - `acc`: accumulates features that are fully assembled *)
+    let add_atom atomtype content (interm, acc) =
+      let atom = atom_to_string atomtype content in
+      let interm' = [[atom]] :: List.map (List.map (fun fs -> atom::fs)) interm in
+      (removelast interm', List.flatten interm' @ acc) in
+    let set_interm (_interm, acc) (_struct_interm, struct_acc) x = (x, acc), (x, struct_acc) in
+    let start = replicate [] (maxlength - 1) in
+    let reset_interm f struct_f = set_interm f  struct_f start in
+    let rec aux_reset ((_interm, _acc) as f) ((_struct_interm, _struct_acc) as struct_f) term =
+      let reset_f, reset_struct_f = reset_interm f struct_f in 
+      let f', struct_f' = aux reset_f reset_struct_f term in
+      reset_interm f' struct_f'
+    and aux_reset_fold f struct_f terms = List.fold_left (fun (f, struct_f) term-> 
+      aux_reset f struct_f term) (f, struct_f) terms
+    and aux ((interm, _acc) as f) ((_struct_interm, _struct_acc) as struct_f) term = match term with
+      (* Interesting leafs *)
+      | Node (Leaf nt :: ls) when is_atom nt ->
+        add_atom nt ls f, struct_f
+      (* Uninteresting leafs *)
+      | Node (Leaf "Sort" :: _)
+      | Node (Leaf "Meta" :: _) -> (f, struct_f)
+      (* Recursion for grammar we don't handle *)
+      | Node [Leaf "LetIn"; _id; _; body1; typ; body2] ->
+        aux_reset_fold f struct_f [body1; typ; body2]
+      | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
+        aux_reset_fold f struct_f (term::typ::cases)
+      | Node [Leaf "Fix"; _; Node types; Node terms]
+      | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
+        aux_reset_fold f struct_f (terms @ types)
+      | Node [Leaf "Prod"  ; _; _; typ; body]
+      | Node [Leaf "Lambda"; _; _; typ; body] -> aux_reset_fold f struct_f [typ; body]
+      (* The golden path *)
+      | Node [Leaf "Proj"; p; term] -> aux (add_atom "Const" [p] f) struct_f term
+      | Node (Leaf "App" :: head :: args) ->
+        let ((interm', _ as f'), (_struct_interm', _ as struct_f')) = aux f struct_f head in
+        let f', struct_f' = List.fold_left (fun (f, struct_f) arg ->
+          let f, struct_f = aux f struct_f arg in
+          (* We reset back to `interm'` for every arg *)
+          set_interm f struct_f interm') 
+          (f', struct_f') args in
+        reset_interm f' struct_f'
+      | Node [Leaf "Cast"; term; _; typ] ->
+        (* We probably want to have the type of the cast, but isolated *)
+        let reset_f, reset_strcut_f = reset_interm f struct_f in
+        let f', strcut_f' = aux reset_f reset_strcut_f typ in
+        let f', struct_f' = set_interm f' strcut_f' interm in
+        aux f' struct_f' term
+      (* Hope and pray *)
+      | term -> warn term oterm; (f, struct_f)
+    in
+    let _, _ = aux (start, []) (start, []) oterm in ()
+    (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states 
+    List.rev_map (String.concat "-") res *)
+
   let tfidf size freqs ls1 ls2 =
     let inter = intersect compare ls1 ls2 in
     List.fold_left (+.) 0.
