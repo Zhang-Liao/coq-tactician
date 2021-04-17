@@ -3,7 +3,6 @@ open Context
 open Learner_helper
 
 type feat_kind = Struct | Seman | Verti
-type proof_state_part = Goal | Hyps
 
 module F (TS: TacticianStructures) = struct
   module LH = L(TS)
@@ -122,7 +121,7 @@ module F (TS: TacticianStructures) = struct
 
   let proof_state_to_simple_ints ps =
     let feats = proof_state_to_simple_features 2 ps in
-    print_endline (String.concat ", " feats); 
+    (* print_endline (String.concat ", " feats); *) 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map Hashtbl.hash feats in
     List.sort_uniq Int.compare feats
@@ -359,7 +358,7 @@ module F (TS: TacticianStructures) = struct
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats_with_count = List.rev_map (fun ((feat_kind, feat), count) -> feat_kind, feat ^ "-" ^ (Stdlib.string_of_int count))
         feats_with_count_pair in
-    print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); 
+    (* print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); *)
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
@@ -390,6 +389,7 @@ module F (TS: TacticianStructures) = struct
     let set_interm (_interm, acc) (_struct_interm, struct_acc) x = (x, acc), (x, struct_acc) in
     let start = replicate [] (maxlength - 1) in
     let reset_interm f struct_f = set_interm f  struct_f start in
+    let get_struct_feature depth  = () in 
     let rec aux_reset ((_interm, _acc) as f) ((_struct_interm, _struct_acc) as struct_f) term =
       let reset_f, reset_struct_f = reset_interm f struct_f in 
       let f', struct_f' = aux reset_f reset_struct_f term in
