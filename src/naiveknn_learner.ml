@@ -77,7 +77,7 @@ module ComplexNaiveKnn : TacticianOnlineLearnerType = functor (TS : TacticianStr
   open FH
   let learn db _loc outcomes tac = learn db _loc outcomes tac
       (fun x -> remove_feat_kind @@ proof_state_to_complex_ints x)
-  let predict db f = print_endline "complex features"; predict db f proof_state_to_complex_ints manually_weighed_tfidf
+  let predict db f = predict db f proof_state_to_complex_ints manually_weighed_tfidf
 
 end
 

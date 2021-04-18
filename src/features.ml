@@ -384,55 +384,69 @@ module F (TS: TacticianStructures) = struct
        - `acc`: accumulates features that are fully assembled *)
     let add_atom atomtype content (interm, acc) =
       let atom = atom_to_string atomtype content in
+      (* `interm` contains term tree walks to maximal depth, maximal depth - 1,..., 1 *)
       let interm' = [[atom]] :: List.map (List.map (fun fs -> atom::fs)) interm in
+      (* Remove the last item to keep the maximal depth constraint. 
+        The length of `interm` = the maximal depth constraint. 
+        The initial `interm` is [[walk],[],...,[]]; thus, `removelast` will remove [] in the beginning *)
       (removelast interm', List.flatten interm' @ acc) in
-    let set_interm (_interm, acc) (_struct_interm, struct_acc) x = (x, acc), (x, struct_acc) in
+    let set_interm (_interm, acc) x = (x, acc) in
     let start = replicate [] (maxlength - 1) in
-    let reset_interm f struct_f = set_interm f  struct_f start in
-    let get_struct_feature depth  = () in 
-    let rec aux_reset ((_interm, _acc) as f) ((_struct_interm, _struct_acc) as struct_f) term =
-      let reset_f, reset_struct_f = reset_interm f struct_f in 
-      let f', struct_f' = aux reset_f reset_struct_f term in
-      reset_interm f' struct_f'
-    and aux_reset_fold f struct_f terms = List.fold_left (fun (f, struct_f) term-> 
-      aux_reset f struct_f term) (f, struct_f) terms
-    and aux ((interm, _acc) as f) ((_struct_interm, _struct_acc) as struct_f) term = match term with
+    let reset_interm feature = set_interm feature start in
+    let add_node_info (feature, struct_feature) role = 
+      feature, "(" :: role:: struct_feature @ [")"] in 
+    let rec aux_reset ((_interm, _acc) as feature) struct_feature term depth=
+      let reset_feature = reset_interm feature in 
+      let feature', struct_feature' = aux reset_feature struct_feature term depth in
+      reset_interm feature', struct_feature'
+    and aux_reset_fold feature struct_feature terms depth = 
+      let next_level_depth = depth + 1 in
+      List.fold_left (fun (feature, struct_feature) term-> 
+        aux_reset feature struct_feature term next_level_depth) (feature, struct_feature) terms
+    and aux ((interm, _acc) as feature) struct_feature term depth = match term with
       (* Interesting leafs *)
       | Node (Leaf nt :: ls) when is_atom nt ->
-        add_atom nt ls f, struct_f
+        add_atom nt ls feature, ["X"]
       (* Uninteresting leafs *)
       | Node (Leaf "Sort" :: _)
-      | Node (Leaf "Meta" :: _) -> (f, struct_f)
+      | Node (Leaf "Meta" :: _) -> (feature, struct_feature)
       (* Recursion for grammar we don't handle *)
       | Node [Leaf "LetIn"; _id; _; body1; typ; body2] ->
-        aux_reset_fold f struct_f [body1; typ; body2]
+        add_node_info (aux_reset_fold feature struct_feature [body1; typ; body2] depth) "LetIn"
       | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
-        aux_reset_fold f struct_f (term::typ::cases)
-      | Node [Leaf "Fix"; _; Node types; Node terms]
+        add_node_info (aux_reset_fold feature struct_feature (term::typ::cases) depth) "Case"
+      | Node [Leaf "Fix"; _; Node types; Node terms] ->
+        add_node_info (aux_reset_fold feature struct_feature (terms @ types) depth) "Fix"
       | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
-        aux_reset_fold f struct_f (terms @ types)
-      | Node [Leaf "Prod"  ; _; _; typ; body]
-      | Node [Leaf "Lambda"; _; _; typ; body] -> aux_reset_fold f struct_f [typ; body]
+        add_node_info (aux_reset_fold feature struct_feature (terms @ types) depth) "CoFix" 
+      | Node [Leaf "Prod"  ; _; _; typ; body] ->
+        add_node_info (aux_reset_fold feature struct_feature [typ; body] depth) "Prod"
+      | Node [Leaf "Lambda"; _; _; typ; body] -> 
+        add_node_info (aux_reset_fold feature struct_feature [typ; body] depth) "Lambda"
       (* The golden path *)
-      | Node [Leaf "Proj"; p; term] -> aux (add_atom "Const" [p] f) struct_f term
+      | Node [Leaf "Proj"; p; term] -> 
+        add_node_info (aux (add_atom "Const" [p] feature) struct_feature term (depth + 1)) "Proj"
       | Node (Leaf "App" :: head :: args) ->
-        let ((interm', _ as f'), (_struct_interm', _ as struct_f')) = aux f struct_f head in
-        let f', struct_f' = List.fold_left (fun (f, struct_f) arg ->
-          let f, struct_f = aux f struct_f arg in
+        let arg_num = List.length args in
+        let (interm', _ as feature'), struct_feature' = add_node_info (add_node_info 
+          (aux feature struct_feature head (depth + 1)) (Stdlib.string_of_int arg_num)) "App" in
+        let feature', struct_feature' = List.fold_left (fun (feature, struct_feature) arg ->
+          let feature, struct_feature = aux feature struct_feature arg (depth + 1) in
           (* We reset back to `interm'` for every arg *)
-          set_interm f struct_f interm') 
-          (f', struct_f') args in
-        reset_interm f' struct_f'
+          set_interm feature interm', struct_feature) 
+          (feature', struct_feature') args in
+        reset_interm feature', struct_feature'
       | Node [Leaf "Cast"; term; _; typ] ->
         (* We probably want to have the type of the cast, but isolated *)
-        let reset_f, reset_strcut_f = reset_interm f struct_f in
-        let f', strcut_f' = aux reset_f reset_strcut_f typ in
-        let f', struct_f' = set_interm f' strcut_f' interm in
-        aux f' struct_f' term
+        let reset_feature = reset_interm feature in
+        let feature', strcut_feature' = aux reset_feature struct_feature typ (depth + 1) in
+        let feature' = set_interm feature' interm in
+        add_node_info (aux feature' strcut_feature' term (depth + 1)) "Cast"
+        (* aux_seman (set_interm (aux_seman (reset_interm f) typ "CastType") interm) term "CastTerm" *)
       (* Hope and pray *)
-      | term -> warn term oterm; (f, struct_f)
+      | term -> warn term oterm; feature, struct_feature
     in
-    let _, _ = aux (start, []) (start, []) oterm in ()
+    let _, _ = aux (start, []) [] oterm 0 in ()
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states 
     List.rev_map (String.concat "-") res *)
 
