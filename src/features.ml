@@ -208,7 +208,7 @@ module F (TS: TacticianStructures) = struct
     let set_interm (_, acc) x = x, acc in
     let start = replicate [] (maxlength - 1) in
     let reset_interm f = set_interm f start in
-    (* let verti_atom atomtype content (interm, acc) role =
+    let verti_atom atomtype content (interm, acc) role =
       let atom_with_role = get_atom_with_role atomtype content role in
       let new_interm = interm @ [atom_with_role] in
       (new_interm, acc @ [new_interm]) in
@@ -269,7 +269,7 @@ module F (TS: TacticianStructures) = struct
     let remove_ident seman_feats =
       List.fold_left (fun acc feat -> if List.length feat < 2 then acc else
       acc @ [feat] ) [] seman_feats
-    in *)
+    in
     let rec aux_seman_reset f term role = reset_interm (aux_seman (reset_interm f) term role)
     and aux_seman_reset_fold f terms roles =
     List.fold_left (fun f' (term, role) -> aux_seman_reset f' term role) f (List.combine terms roles)
@@ -316,13 +316,13 @@ module F (TS: TacticianStructures) = struct
       (* Hope and pray *)
       | term -> warn term oterm; f
     in
-    (* let _, vert_feats = aux_vert ([], []) oterm  in
-    let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in *)
+    let _, vert_feats = aux_vert ([], []) oterm  in
+    let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in 
     let struct_feats = Struct, "Struct" :: (aux_struct oterm 0) in
     let _, seman_feats = (aux_seman (start, []) oterm "Init_Constr") in
     let seman_feats = List.map (fun feat -> Seman, "Seman" :: feat) seman_feats in
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states *)
-    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) ((struct_feats) :: seman_feats)
+    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) (vert_feats @ struct_feats :: seman_feats)
 
   let proof_state_to_complex_features max_length ps =
     let hyps = proof_state_hypotheses ps in
