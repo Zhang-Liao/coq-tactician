@@ -317,12 +317,12 @@ module F (TS: TacticianStructures) = struct
       | term -> warn term oterm; f
     in
     let _, vert_feats = aux_vert ([], []) oterm  in
-    let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in 
+    (* let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in *) 
     let struct_feats = Struct, "Struct" :: (aux_struct oterm 0) in
     let _, seman_feats = (aux_seman (start, []) oterm "Init_Constr") in
     let seman_feats = List.map (fun feat -> Seman, "Seman" :: feat) seman_feats in
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states *)
-    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) (vert_feats @ struct_feats :: seman_feats)
+    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) (struct_feats :: seman_feats)
 
   let proof_state_to_complex_features max_length ps =
     let hyps = proof_state_hypotheses ps in
