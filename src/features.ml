@@ -198,8 +198,12 @@ module F (TS: TacticianStructures) = struct
       let atom = (atom_to_string atomtype content) in
       atom ^":"^role
     in
-    let add_atom atomtype content (interm, acc) role =
-      let atom_with_role = get_atom_with_role atomtype content role in
+    let get_atom atomtype content =
+      let atom = (atom_to_string atomtype content) in
+      atom
+    in    
+    let add_atom atomtype content (interm, acc) =
+      let atom_with_role = get_atom atomtype content in
       let interm' = [[atom_with_role]] ::
         List.map (List.map (fun fs -> fs @ [atom_with_role])) interm in
       (* use removelast to control the length of terms *)
@@ -269,59 +273,53 @@ module F (TS: TacticianStructures) = struct
       List.fold_left (fun acc feat -> if List.length feat < 2 then acc else
       acc @ [feat] ) [] seman_feats
     in
-    let rec aux_seman_reset f term role = reset_interm (aux_seman (reset_interm f) term role)
-    and aux_seman_reset_fold f terms roles =
-    List.fold_left (fun f' (term, role) -> aux_seman_reset f' term role) f (List.combine terms roles)
-    and aux_seman ((interm, _) as f) term role=
+    let rec aux_seman_reset f term = reset_interm (aux_seman (reset_interm f) term)
+    and aux_seman_reset_fold f terms =
+    List.fold_left (fun f' term  -> aux_seman_reset f' term) f terms
+    and aux_seman ((interm, _) as f) term =
     match term with
       (* Interesting leafs *)
       | Node (Leaf nt :: ls) when is_atom nt ->
-        add_atom nt ls f role
+        add_atom nt ls f
       (* Uninteresting leafs *)
       | Node (Leaf "Sort" :: _)
       | Node (Leaf "Meta" :: _) -> f
       (* Recursion for grammar we don't handle *)
       (* TODO: Handle binders with feature substitution *)
       | Node [Leaf "LetIn"; _; _; body1; typ; body2] ->
-        let roles = ["LetVarBody"; "LetVarType"; "LetBody"] in
-        aux_seman_reset_fold f [body1; typ; body2] roles
+        aux_seman_reset_fold f [body1; typ; body2]
       | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
-        let roles = (["MatchTerm"; "MatchTermType"] @ (rep_elem (List.length cases) "Case")) in
-        aux_seman_reset_fold f (term::typ::cases) roles
+        aux_seman_reset_fold f (term::typ::cases) 
       | Node [Leaf "Fix"; _; Node types; Node terms] ->
-        let roles = (rep_elem (List.length terms) "FixTerm")
-          @ (rep_elem (List.length types) "FixType") in
-        aux_seman_reset_fold f (terms @ types) roles
+        aux_seman_reset_fold f (terms @ types) 
       | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
-        let roles = (rep_elem (List.length terms) "CoFixTerm")
-          @ (rep_elem (List.length types) "CoFixType") in
-        aux_seman_reset_fold f (terms @ types) roles
+        aux_seman_reset_fold f (terms @ types)
         (* TODO: Handle implication separately *)
       | Node [Leaf "Prod"  ; _; _; typ; body] ->
-        aux_seman_reset_fold f [typ; body] ["ProdType"; "ProdBody"]
+        aux_seman_reset_fold f [typ; body] 
       | Node [Leaf "Lambda"; _; _; typ; body] ->
-        aux_seman_reset_fold f [typ; body] ["LambdaType"; "LambdaBody"]
+        aux_seman_reset_fold f [typ; body]
         (* The golden path *)
       | Node [Leaf "Proj"; p; term] ->
-        aux_seman (add_atom "Const" [p] f "Proj") term "Proj"
+        aux_seman (add_atom "Const" [p] f) term 
       | Node (Leaf "App" :: head :: args) ->
-        let interm', _ as f' = aux_seman f head "AppFun" in
+        let interm', _ as f' = aux_seman f head in
         (* We reset back to `interm'` for every arg *)
         reset_interm
-          (List.fold_left (fun f' t -> set_interm (aux_seman f' t "AppArg") interm') f' args)
+          (List.fold_left (fun f' t -> set_interm (aux_seman f' t) interm') f' args)
       | Node [Leaf "Cast"; term; _; typ] ->
         (* We probably want to have the type of the cast, but isolated *)
-        aux_seman (set_interm (aux_seman (reset_interm f) typ "CastType") interm) term "CastTerm"
+        aux_seman (set_interm (aux_seman (reset_interm f) typ) interm) term
       (* Hope and pray *)
       | term -> warn term oterm; f
     in
     let _, vert_feats = aux_vert ([], []) oterm  in
-    (* let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in *) 
+    let vert_feats = List.map (fun feat -> Verti, "Verti" :: feat) (remove_ident vert_feats) in 
     let struct_feats = Struct, "Struct" :: (aux_struct oterm 0) in
-    let _, seman_feats = (aux_seman (start, []) oterm "Init_Constr") in
+    let _, seman_feats = (aux_seman (start, []) oterm) in
     let seman_feats = List.map (fun feat -> Seman, "Seman" :: feat) seman_feats in
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states *)
-    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) (struct_feats :: seman_feats)
+    List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) (struct_feats :: vert_feats@ seman_feats)
 
   let proof_state_to_complex_features max_length ps =
     let hyps = proof_state_hypotheses ps in
@@ -357,13 +355,12 @@ module F (TS: TacticianStructures) = struct
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats_with_count = List.rev_map (fun ((feat_kind, feat), count) -> feat_kind, feat ^ "-" ^ (Stdlib.string_of_int count))
         feats_with_count_pair in
-    (* print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); *)
+    (* print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); *) 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
       
-
-      
+(**
   let term_sexpr_to_decision_tree_features maxlength oterm =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
     let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
@@ -493,7 +490,7 @@ module F (TS: TacticianStructures) = struct
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun feat -> Hashtbl.hash feat) decision_tree_feats in
     List.sort_uniq (fun feat1 feat2 -> Int.compare feat1 feat2) feats
-  
+*)  
 
 
 
