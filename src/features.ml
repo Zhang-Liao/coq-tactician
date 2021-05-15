@@ -365,7 +365,7 @@ module F (TS: TacticianStructures) = struct
     let feats = List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
       
-(*
+
   let term_sexpr_to_decision_tree_features maxlength oterm =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
     let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
@@ -384,8 +384,8 @@ module F (TS: TacticianStructures) = struct
        - `interm` is an intermediate list of list of features that are still being assembled
          invariant: `forall i ls, 0<i<=maxlength -> In ls (List.nth (i - 1)) -> List.length ls = i`
        - `acc`: accumulates features that are fully assembled *)
-    let add_atom atomtype content semantic_features =
-      let interm, acc = semantic_features.interm, semantic_features.acc in
+    let add_atom atomtype content features =
+      let interm, acc = features.semantic.interm, features.semantic.acc in
       let atom = atom_to_string atomtype content in
       (* `interm` contains term tree walks to maximal depth, maximal depth - 1,..., 1 *)
       let interm' = [[atom]] :: List.map (List.map (fun fs -> atom::fs)) interm in
@@ -394,71 +394,71 @@ module F (TS: TacticianStructures) = struct
         The initial `interm` is [[walk],[],...,[]]; thus, `removelast` will remove [] in the beginning *)
       {interm = removelast interm'; acc = List.flatten interm' @ acc} 
     in
-    let set_interm (_interm, acc) x = (x, acc) in
+    let set_interm features x = {features with semantic = {features.semantic with interm = x}} in
     let start = replicate [] (maxlength - 1) in
     let init_features = {semantic = {interm = replicate [] (maxlength - 1); acc = []} ; structure = []} in
-    let reset_interm feature = set_interm feature start in
-    let start_structure role features =
+    let reset_interm features = set_interm features start in
+    let start_structure features role =
       {features with structure = features.structure @ ["(" ; role]}  
     in 
-    let end_structure (feature, struct_feature) = 
-        feature, struct_feature @ [")"] in       
+    let end_structure features = 
+       {features with structure = features.structure @ [")"] }
+    in       
     let rec aux_reset features term depth=
-      let reset_feature = reset_interm feature in 
-      let feature', struct_feature' = aux reset_feature struct_feature term depth in
-      reset_interm feature', struct_feature'
+      let reset_features = reset_interm features in 
+      let features' = aux reset_features term depth in
+      reset_interm features'
     and aux_reset_fold features terms depth = 
       let next_level_depth = depth + 1 in
-      List.fold_left (fun (feature, struct_feature) term-> 
-        aux_reset feature struct_feature term next_level_depth) features terms
+      List.fold_left (fun features' term-> 
+        aux_reset features' term next_level_depth) features terms 
     and aux features term depth = 
       let features = match term with
         (* Interesting leafs *)
         | Node (Leaf nt :: ls) when is_atom nt ->
           if depth > 2 then
-            {features with semantic = add_atom nt ls features.semantic}
+            {features with semantic = add_atom nt ls features}
           else
-            {features with 
-              semantic = add_atom nt ls features.semantic;
-              structure = features.structure @ ["X"]}
+            {semantic = add_atom nt ls features;
+            structure = features.structure @ ["X"]}
         (* Uninteresting leafs *)
         | Node (Leaf "Sort" :: _)
         | Node (Leaf "Meta" :: _) -> features
         (* Recursion for grammar we don't handle *)
         | Node [Leaf "LetIn"; _id; _; body1; typ; body2] ->
-          end_structure (aux_reset_fold features (start_structure struct_features "LetIn") [body1; typ; body2] depth)
+          end_structure (aux_reset_fold (start_structure features "LetIn") [body1; typ; body2] depth)
         | Node (Leaf "Case" :: _ :: term :: typ :: cases) ->
-          end_structure (aux_reset_fold features (start_structure struct_features "Case") (term::typ::cases) depth)
+          end_structure (aux_reset_fold (start_structure features "Case") (term::typ::cases) depth)
         | Node [Leaf "Fix"; _; Node types; Node terms] ->
-          end_structure (aux_reset_fold features (start_structure struct_features "Fix") (terms @ types) depth) 
+          end_structure (aux_reset_fold (start_structure features "Fix") (terms @ types) depth) 
         | Node [Leaf "CoFix"; _ ; Node types; Node terms] ->
-          end_structure (aux_reset_fold features (start_structure struct_features "CoFix") (terms @ types) depth) 
+          end_structure (aux_reset_fold (start_structure features "CoFix") (terms @ types) depth) 
         | Node [Leaf "Prod"  ; _; _; typ; body] ->
-          end_structure(aux_reset_fold features (start_structure struct_features "Prod") [typ; body] depth) 
+          end_structure(aux_reset_fold (start_structure features "Prod") [typ; body] depth) 
         | Node [Leaf "Lambda"; _; _; typ; body] -> 
-          end_structure(aux_reset_fold features (start_structure struct_features "Lambda") [typ; body] depth) 
+          end_structure(aux_reset_fold (start_structure features "Lambda") [typ; body] depth) 
         (* The golden path *)
         | Node [Leaf "Proj"; p; term] -> 
-          end_structure(aux (add_atom "Const" [p] features) (start_structure struct_features "Proj") term (depth + 1)) 
+          let features' = start_structure {features with semantic = add_atom "Const" [p] features} "Proj"
+          in end_structure (aux features' term (depth + 1))
         | Node (Leaf "App" :: head :: args) ->
           let arg_num = List.length args in
-          let (interm', _ as feature_with_head), struct_feature_with_head = 
-            aux features (start_structure struct_features "App") head (depth + 1) in
-          let struct_feature_with_head_arg_num = struct_feature_with_head @ [Stdlib.string_of_int arg_num] in
-          (* let (interm', _ as feature'), struct_feature' = add_node_info (add_node_info 
-            (aux features struct_features head (depth + 1)) (Stdlib.string_of_int arg_num)) "App" in *)
-          let feature', struct_feature' = List.fold_left (fun (feature_acc, struct_feature_acc) arg ->
-            let feature_acc', struct_feature_acc' = aux feature_acc struct_feature_acc arg (depth + 1) in
-            (* We reset back to `interm'` for every arg *)
-            set_interm feature_acc' interm', struct_feature_acc') 
-            (feature_with_head, struct_feature_with_head_arg_num) args in
-          end_structure(reset_interm feature', struct_feature')
+          let features_with_head = aux (start_structure features "App") head (depth + 1) in
+          let features_with_head_and_arg_num = 
+            {features_with_head with structure = features_with_head.structure @ [Stdlib.string_of_int arg_num]} in
+          let feature' = List.fold_left (fun features arg ->
+            let features_this_arg = aux features arg (depth + 1) in
+            (* We reset back to `interm` of `features_with_head_and_arg_num` for every arg *)
+            set_interm features_this_arg features_with_head_and_arg_num.semantic.interm) 
+            features_with_head_and_arg_num args 
+          in
+          end_structure(reset_interm feature')
         | Node [Leaf "Cast"; term; _; typ] ->
           (* We probably want to have the type of the cast, but isolated *)
-          let reset_feature = reset_interm features in
-          let feature', strcut_feature' = aux reset_feature (start_structure struct_features "Cast") typ (depth + 1) in
-          let feature' = set_interm feature' interm in
-          end_structure (aux feature' strcut_feature' term (depth + 1)) 
+          let features_reset = reset_interm features in
+          let features_with_type = aux (start_structure features_reset "Cast") typ (depth + 1) in
+          let feature' = set_interm features_with_type features.semantic.interm in
+          end_structure (aux feature' term (depth + 1)) 
         (* Hope and pray *)
         | term -> warn term oterm; features
       in
@@ -469,7 +469,7 @@ module F (TS: TacticianStructures) = struct
     in
     let features = aux init_features oterm 0 in 
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states *)
-    List.rev_map (String.concat "-") (features.structure :: features.semantic)
+    List.rev_map (String.concat "-") (features.structure :: features.semantic.acc)
     
     let proof_state_to_decision_tree_features max_length ps =
       let hyps = proof_state_hypotheses ps in
@@ -502,8 +502,6 @@ module F (TS: TacticianStructures) = struct
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun feat -> Hashtbl.hash feat) decision_tree_feats in
     List.sort_uniq (fun feat1 feat2 -> Int.compare feat1 feat2) feats
-
-*)
 
 
   let tfidf size freqs ls1 ls2 =

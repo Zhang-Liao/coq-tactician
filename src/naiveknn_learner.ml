@@ -81,7 +81,7 @@ module ComplexNaiveKnn : TacticianOnlineLearnerType = functor (TS : TacticianStr
 
 end
 
-(**
+
 module TreeForKnn : TacticianOnlineLearnerType = functor (TS : TacticianStructures) -> struct
   module NaiveKnn = NaiveKnn(TS)
   include NaiveKnn
@@ -92,7 +92,7 @@ module TreeForKnn : TacticianOnlineLearnerType = functor (TS : TacticianStructur
   let predict db f = predict db f proof_state_to_decision_tree_ints tfidf
 
 end
-*)
+
 
 
 let () = register_online_learner "naive-knn" (module ComplexNaiveKnn) 
