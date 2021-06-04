@@ -363,7 +363,7 @@ module F (TS: TacticianStructures) = struct
     let feats = List.rev_map (fun (feat_kind, feat) -> feat_kind, Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun (_, feat1) (_, feat2) -> Int.compare feat1 feat2) feats
       
-(*  
+
   let term_sexpr_to_decision_tree_features maxlength oterm =
     let atomtypes = ["Evar"; "Rel"; "Construct"; "Ind"; "Const"; "Var"; "Int"; "Float"] in
     let is_atom nodetype = List.exists (String.equal nodetype) atomtypes in
@@ -482,25 +482,21 @@ module F (TS: TacticianStructures) = struct
       let hyp_feats = List.map (fun (_, _, feats) -> feats) hyp_id_typ_feats in
       let goal_feats = mkfeats goal in
       (List.map (fun feat -> "GOAL-"^ feat) goal_feats) @  
-      (List.map (fun feat -> "HYPS-"^ feat) (List.flatten hyp_feats))
-      (* seperate the goal from the local context  
-      (disting_hyps_goal goal_feats "GOAL-") @ (disting_hyps_goal (List.flatten hyp_feats) "HYPS-") *)
+      (List.map (fun feat -> "HYPS-"^ feat) (List.flatten hyp_feats)) 
+      (* seperate the goal from the local context *)  
           
   let proof_state_to_decision_tree_ints ps =
     (* let feats = proof_state_to_complex_features 3 ps in *)
-    let decision_tree_feats = proof_state_to_decision_tree_features 3 ps in
-    (* let feats_with_count_pair = count_dup feats in *)
+    let decision_tree_feats = proof_state_to_decision_tree_features 2 ps in
+    let feats_with_count_pair = count_dup decision_tree_feats in 
     (* Tail recursive version of map, because these lists can get very large. *)
-    (* let feats_with_count = List.rev_map (fun ((feat_kind, feat), count) -> feat_kind, feat ^ "-" ^ (Stdlib.string_of_int count))
+    let feats_with_count = List.rev_map (fun (feat, count) -> feat ^ "-" ^ (Stdlib.string_of_int count))
         feats_with_count_pair in 
-    print_endline "complex features";
-    print_endline (String.concat ", "  (List.map Stdlib.snd feats_with_count)); 
-    print_endline "decision tree features";    
-    print_endline (String.concat ", "  (decision_tree_feats)); *) 
+    (* print_endline (String.concat ", "  (feats_with_count)); *)
     (* Tail recursive version of map, because these lists can get very large. *)
-    let feats = List.rev_map (fun feat -> Hashtbl.hash feat) decision_tree_feats in
+    let feats = List.rev_map (fun feat -> Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun feat1 feat2 -> Int.compare feat1 feat2) feats
-*)
+
 
   let tfidf size freqs ls1 ls2 =
     let inter = intersect compare ls1 ls2 in
