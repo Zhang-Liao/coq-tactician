@@ -407,13 +407,16 @@ module F (TS: TacticianStructures) = struct
     in 
     let end_structure features = 
        {features with structure = features.structure @ [")"] }
-    in  
+    in    
     let verti_atom atomtype content features role =
-      let atom_with_role = (atom_to_string atomtype content) ^":"^role in {
-        features with vertical = {
+      if List.length features.vertical.walk == 1 then
+        features
+      else  
+        let atom_with_role = (atom_to_string atomtype content) ^":"^role in 
+        {features with vertical = {
           features.vertical with acc = 
           (features.vertical.walk@[atom_with_role]) :: features.vertical.acc 
-      }} 
+        }} 
     in  
     let calculate_vertical_features term role features =
       match term with
@@ -474,11 +477,13 @@ module F (TS: TacticianStructures) = struct
           let features' = start_structure {features with semantic = add_atom "Const" [p] features} "Proj"
           in end_structure (aux features' term "ProjTerm" (depth + 1))
         | Node (Leaf "App" :: head :: args) ->
+          let walk = features.vertical.walk in
           let arg_num = List.length args in
           let features_with_head = aux (start_structure features "App") head "AppFun" (depth + 1) in
           let features_with_head_and_arg_num = 
             {features_with_head with structure = features_with_head.structure @ [Stdlib.string_of_int arg_num]} in
           let feature' = List.fold_left (fun features arg ->
+            let features = set_walk features walk in
             let features_this_arg = aux features arg "AppArg" (depth + 1) in
             (* We reset back to `interm` of `features_with_head_and_arg_num` for every arg *)
             set_interm features_this_arg features_with_head_and_arg_num.semantic.interm) 
@@ -520,16 +525,16 @@ module F (TS: TacticianStructures) = struct
       (* seperate the goal from the local context *)  
           
   let proof_state_to_decision_tree_ints ps =
-    (* let complex_feats = proof_state_to_complex_features 3 ps in *)
+    (* let complex_feats = proof_state_to_complex_features 2 ps in *)
     let decision_tree_feats = proof_state_to_decision_tree_features 2 ps in
     let feats_with_count_pair = count_dup decision_tree_feats in 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats_with_count = List.rev_map (fun (feat, count) -> feat ^ "-" ^ (Stdlib.string_of_int count))
         feats_with_count_pair in 
     (* print_endline "complex";
-    print_endline (String.concat ", "  (List.map Stdlib.snd complex_feats)); *)        
-    (* print_endline "desision tree";
-    print_endline (String.concat ", "  (feats_with_count)); *) 
+    print_endline (String.concat ", "  (List.map Stdlib.snd complex_feats));         
+    print_endline "desision tree";
+    print_endline (String.concat ", "  (decision_tree_feats)); *) 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun feat -> Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun feat1 feat2 -> Int.compare feat1 feat2) feats
