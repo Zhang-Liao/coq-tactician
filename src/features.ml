@@ -338,7 +338,7 @@ module F (TS: TacticianStructures) = struct
       (List.map
          (fun (feat_kind, f) ->
             if feat_kind == Struct
-            then (Float.of_int(2) *. similarity_for_one_feat f)
+            then (Float.of_int(1) *. similarity_for_one_feat f)
             else similarity_for_one_feat f)
          inter)
 
