@@ -278,8 +278,8 @@ module F (TS: TacticianStructures) = struct
       else features 
     in
     let features = aux init_features oterm "Root" 0 in
-    let add_feature_kind features kind = List.map (fun feature -> kind, feature) features in
     (* We use tail-recursive rev_map instead of map to avoid stack overflows on large proof states *)
+    let add_feature_kind features kind = List.rev_map (fun feature -> kind, feature) features in
     List.rev_map (fun (feat_kind, feats) -> feat_kind, String.concat "-" feats) (
       (Struct, features.structure) :: 
       ((add_feature_kind features.semantic.acc Seman) @ 
@@ -297,22 +297,20 @@ module F (TS: TacticianStructures) = struct
           hyps in
       let hyp_feats = List.map (fun (_, _, feats) -> feats) hyp_id_typ_feats in
       let goal_feats = mkfeats goal in
-      (List.map (fun (kind, feat) -> kind, "GOAL-"^ feat) goal_feats) @  
-      (List.map (fun (kind, feat) -> kind, "HYPS-"^ feat) (List.flatten hyp_feats)) 
       (* seperate the goal from the local context *)  
+      (List.rev_map (fun (kind, feat) -> kind, "GOAL-"^ feat) goal_feats) @  
+      (List.rev_map (fun (kind, feat) -> kind, "HYPS-"^ feat) (List.flatten hyp_feats)) 
           
   let proof_state_to_complex_ints ps =
-    (* let complex_feats = proof_state_to_complex_features 2 ps in *)
     let complex_feats = proof_state_to_complex_features 2 ps in
     let feats_with_count_pair = count_dup complex_feats in 
     (* Tail recursive version of map, because these lists can get very large. *)
     let feats_with_count = List.rev_map (fun ((kind, feat), count) -> kind, feat ^ "-" ^ (Stdlib.string_of_int count))
         feats_with_count_pair in 
     (* print_endline (String.concat ", "  (List.map Stdlib.snd complex_feats)); *)
-    (* Tail recursive version of map, because these lists can get very large. *)
     let feats = List.rev_map (fun (kind, feat) ->  kind, Hashtbl.hash feat) feats_with_count in
     List.sort_uniq (fun (_kind1, feat1) (_kind2, feat2) -> Int.compare feat1 feat2) feats
-
+    
   let context_features_complex max_length ctx =
     let mkfeats t = term_sexpr_to_complex_features max_length (term_sexpr t) in
     context_map mkfeats mkfeats ctx
@@ -326,7 +324,7 @@ module F (TS: TacticianStructures) = struct
          inter)
 
   let remove_feat_kind l =
-    List.map Stdlib.snd l
+    List.rev_map Stdlib.snd l
 
   let manually_weighed_tfidf size freq ls1 ls2 =
     let inter = intersect (fun x y -> compare (snd x) y) ls1 ls2 in
